@@ -49,7 +49,7 @@ func ExtractSymbol(keyDecoded map[string]string) string {
 
 func (i *contractDataDBOperator) Upsert(ctx context.Context, data any) error {
 	rawRecords := data.([]interface{})
-	var contractId, ledgerSequence, ledgerKeyHash, contractDurability, keySymbol, closedAt, key, val []interface{}
+	var contractId, ledgerSequence, ledgerKeyHash, contractDurability, keySymbol, closedAt, key, val, liveUntil []interface{}
 
 	for _, rawRecord := range rawRecords {
 		contractData, ok := rawRecord.(contract.ContractDataOutput)
@@ -74,6 +74,11 @@ func (i *contractDataDBOperator) Upsert(ctx context.Context, data any) error {
 		closedAt = append(closedAt, contractData.ClosedAt)
 		key = append(key, keyBytes)
 		val = append(val, valBytes)
+		if contractData.LiveUntilLedgerSeq != nil {
+			liveUntil = append(liveUntil, *contractData.LiveUntilLedgerSeq)
+		} else {
+			liveUntil = append(liveUntil, nil)
+		}
 	}
 
 	upsertFields := []UpsertField{
@@ -85,11 +90,17 @@ func (i *contractDataDBOperator) Upsert(ctx context.Context, data any) error {
 		{"key", "bytea", key},
 		{"val", "bytea", val},
 		{"closed_at", "timestamp", closedAt},
+		{"live_until_ledger_sequence", "int", liveUntil},
+	}
+	// A TTL only ever extends, and a NULL means this ledger did not change it: keep the
+	// higher of the stored and the incoming value, as the ttl dataset does.
+	upsertSetExprs := []UpsertSetExpr{
+		{"live_until_ledger_sequence", fmt.Sprintf("GREATEST(%s.live_until_ledger_sequence, excluded.live_until_ledger_sequence)", i.table)},
 	}
 	upsertConditions := []UpsertCondition{
 		{"ledger_sequence", OpGT},
 	}
-	rowsAffected, err := i.session.UpsertRows(ctx, i.table, "key_hash", upsertFields, upsertConditions)
+	rowsAffected, err := i.session.UpsertRows(ctx, i.table, "key_hash", upsertFields, upsertSetExprs, upsertConditions)
 	i.metricRecorder.RecordUpsertCount(i.dataset, rowsAffected)
 	return err
 }

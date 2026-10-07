@@ -71,12 +71,16 @@ func (q *DBSession) GetMaxLedgerSequence(ctx context.Context, tableName string) 
 }
 
 // Extended from https://github.com/stellar/stellar-horizon/blob/main/internal/db2/history/main.go
-func (q *DBSession) UpsertRows(ctx context.Context, table string, conflictField string, fields []UpsertField, conditions []UpsertCondition) (rowsAffected int64, err error) {
+func (q *DBSession) UpsertRows(ctx context.Context, table string, conflictField string, fields []UpsertField, setExprs []UpsertSetExpr, conditions []UpsertCondition) (rowsAffected int64, err error) {
 	unnestPart := make([]string, 0, len(fields))
 	insertFieldsPart := make([]string, 0, len(fields))
 	onConflictPart := make([]string, 0, len(fields))
 	pqArrays := make([]interface{}, 0, len(fields))
 	onConflictConditionPart := make([]string, 0, len(fields))
+	setExprByColumn := make(map[string]string, len(setExprs))
+	for _, setExpr := range setExprs {
+		setExprByColumn[setExpr.column] = setExpr.expr
+	}
 
 	for _, field := range fields {
 		unnestPart = append(
@@ -87,9 +91,13 @@ func (q *DBSession) UpsertRows(ctx context.Context, table string, conflictField 
 			insertFieldsPart,
 			field.name,
 		)
+		setExpr, ok := setExprByColumn[field.name]
+		if !ok {
+			setExpr = "excluded." + field.name
+		}
 		onConflictPart = append(
 			onConflictPart,
-			fmt.Sprintf("%s = excluded.%s", field.name, field.name),
+			fmt.Sprintf("%s = %s", field.name, setExpr),
 		)
 		pqArrays = append(
 			pqArrays,
