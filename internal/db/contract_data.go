@@ -92,10 +92,12 @@ func (i *contractDataDBOperator) Upsert(ctx context.Context, data any) error {
 		{"closed_at", "timestamp", closedAt},
 		{"live_until_ledger_sequence", "int", liveUntil},
 	}
-	// A TTL only ever extends, and a NULL means this ledger did not change it: keep the
-	// higher of the stored and the incoming value, as the ttl dataset does.
+	// A NULL means this ledger did not change the key's TTL, so the stored value stays.
+	// Otherwise the carried value is the key's TTL after this ledger; it can be lower than
+	// the stored one when an entry was deleted and recreated, and the ledger_sequence
+	// condition below already rejects replays of older ledgers.
 	upsertSetExprs := []UpsertSetExpr{
-		{"live_until_ledger_sequence", fmt.Sprintf("GREATEST(%s.live_until_ledger_sequence, excluded.live_until_ledger_sequence)", i.table)},
+		{"live_until_ledger_sequence", fmt.Sprintf("COALESCE(excluded.live_until_ledger_sequence, %s.live_until_ledger_sequence)", i.table)},
 	}
 	upsertConditions := []UpsertCondition{
 		{"ledger_sequence", OpGT},

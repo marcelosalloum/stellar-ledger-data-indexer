@@ -4,5 +4,9 @@
 DROP INDEX CONCURRENTLY IF EXISTS idx_contract_data_contract_id;
 
 -- +migrate Down notransaction
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_contract_data_contract_id
+-- A failed CREATE INDEX CONCURRENTLY leaves an INVALID index that IF NOT
+-- EXISTS would keep, so the exact name is dropped first.
+DROP INDEX CONCURRENTLY IF EXISTS idx_contract_data_contract_id;
+
+CREATE INDEX CONCURRENTLY idx_contract_data_contract_id
 ON public.contract_data (contract_id);

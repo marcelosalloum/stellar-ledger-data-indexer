@@ -14,7 +14,9 @@ type ContractDataProcessor struct {
 	utils.BaseProcessor
 }
 
-// liveUntilByKeyHash returns the highest live_until of each TTL entry changed in the ledger.
+// liveUntilByKeyHash returns the live_until of each TTL entry changed in the ledger. Changes
+// come in application order, so the last one for a key is the value the ttl dataset writes;
+// an entry deleted and recreated within the ledger legitimately ends with a lower TTL.
 func liveUntilByKeyHash(changes []ingest.Change, lhe xdr.LedgerHeaderHistoryEntry) (map[string]uint32, error) {
 	liveUntil := map[string]uint32{}
 	for _, change := range changes {
@@ -25,9 +27,7 @@ func liveUntilByKeyHash(changes []ingest.Change, lhe xdr.LedgerHeaderHistoryEntr
 		if err != nil {
 			return nil, fmt.Errorf("could not transform ttl data %w", err)
 		}
-		if ttl.LiveUntilLedgerSeq > liveUntil[ttl.KeyHash] {
-			liveUntil[ttl.KeyHash] = ttl.LiveUntilLedgerSeq
-		}
+		liveUntil[ttl.KeyHash] = ttl.LiveUntilLedgerSeq
 	}
 	return liveUntil, nil
 }

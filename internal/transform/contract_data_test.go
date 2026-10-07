@@ -71,38 +71,69 @@ func TestGetContractDataDetailsCarriesSameLedgerTTL(t *testing.T) {
 			LedgerSeq: 10,
 		},
 	}
-	ttlChange := func(keyHashHex string, liveUntil uint32) ingest.Change {
+	ttlEntry := func(keyHashHex string, liveUntil uint32) *xdr.LedgerEntry {
 		raw, err := hex.DecodeString(keyHashHex)
 		require.NoError(t, err)
 		var keyHash xdr.Hash
 		copy(keyHash[:], raw)
+		return &xdr.LedgerEntry{
+			Data: xdr.LedgerEntryData{
+				Type: xdr.LedgerEntryTypeTtl,
+				Ttl:  &xdr.TtlEntry{KeyHash: keyHash, LiveUntilLedgerSeq: xdr.Uint32(liveUntil)},
+			},
+		}
+	}
+	ttlChange := func(keyHashHex string, liveUntil uint32) ingest.Change {
 		return ingest.Change{
 			ChangeType: xdr.LedgerEntryChangeTypeLedgerEntryUpdated,
 			Type:       xdr.LedgerEntryTypeTtl,
 			Pre:        &xdr.LedgerEntry{},
-			Post: &xdr.LedgerEntry{
-				Data: xdr.LedgerEntryData{
-					Type: xdr.LedgerEntryTypeTtl,
-					Ttl:  &xdr.TtlEntry{KeyHash: keyHash, LiveUntilLedgerSeq: xdr.Uint32(liveUntil)},
-				},
-			},
+			Post:       ttlEntry(keyHashHex, liveUntil),
+		}
+	}
+	ttlRemoved := func(keyHashHex string, liveUntil uint32) ingest.Change {
+		return ingest.Change{
+			ChangeType: xdr.LedgerEntryChangeTypeLedgerEntryRemoved,
+			Type:       xdr.LedgerEntryTypeTtl,
+			Pre:        ttlEntry(keyHashHex, liveUntil),
 		}
 	}
 	entryKeyHash := makeContractDataTestOutput()[0].LedgerKeyHash
 	otherKeyHash := strings.Repeat("ff", 32)
 
-	t.Run("highest TTL of the same key in the ledger", func(t *testing.T) {
+	t.Run("last TTL change of the same key in the ledger", func(t *testing.T) {
 		changes := append(makeContractDataTestInput(),
 			ttlChange(entryKeyHash, 100),
 			ttlChange(otherKeyHash, 999),
 			ttlChange(entryKeyHash, 300),
-			ttlChange(entryKeyHash, 200),
 		)
 		out, err := GetContractDataDetails(changes, header, "unit test")
 		require.NoError(t, err)
 		require.Len(t, out, 1)
 		require.NotNil(t, out[0].LiveUntilLedgerSeq)
 		assert.Equal(t, uint32(300), *out[0].LiveUntilLedgerSeq)
+	})
+
+	t.Run("key deleted and recreated with a shorter TTL in the ledger", func(t *testing.T) {
+		changes := append(makeContractDataTestInput(),
+			ttlChange(entryKeyHash, 10000),
+			ttlRemoved(entryKeyHash, 10000),
+			ttlChange(entryKeyHash, 6000),
+		)
+		out, err := GetContractDataDetails(changes, header, "unit test")
+		require.NoError(t, err)
+		require.Len(t, out, 1)
+		require.NotNil(t, out[0].LiveUntilLedgerSeq)
+		assert.Equal(t, uint32(6000), *out[0].LiveUntilLedgerSeq)
+	})
+
+	t.Run("key only deleted in the ledger keeps its last TTL, as the ttl dataset does", func(t *testing.T) {
+		changes := append(makeContractDataTestInput(), ttlRemoved(entryKeyHash, 10000))
+		out, err := GetContractDataDetails(changes, header, "unit test")
+		require.NoError(t, err)
+		require.Len(t, out, 1)
+		require.NotNil(t, out[0].LiveUntilLedgerSeq)
+		assert.Equal(t, uint32(10000), *out[0].LiveUntilLedgerSeq)
 	})
 
 	t.Run("no TTL change for the key", func(t *testing.T) {
